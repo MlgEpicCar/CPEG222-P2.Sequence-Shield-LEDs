@@ -145,12 +145,13 @@ int main(void)
             // Trigger Left/Right Movement when a directional button is pressed 
             if (!(GPIOF->IDR & (1U << LEFT_PIN)))
                 state = SHIFT_LEFT;
-            if (!(GPIOE->IDR & (1U << RIGHT_PIN)))
+            else if (!(GPIOE->IDR & (1U << RIGHT_PIN)))
                 state = SHIFT_RIGHT;
         }
 
         while (state == SHIFT_LEFT) {
             if (!(GPIOF->IDR & (1U << CENTER_PIN)))
+                led_pattern = 0;
                 state = PAUSE;
             if (!(GPIOE->IDR & (1U << RIGHT_PIN)))
                 state = SHIFT_RIGHT;
@@ -163,11 +164,15 @@ int main(void)
             }
             LED_PORT->ODR = led_pattern;
 
-            delay_ms(read_pot());
+
+            uint16_t pot_val = read_pot();          // 0–4095
+            uint32_t delay = 1 + (pot_val * 149) / 4095; // maps to ~1–150 ms
+            delay_ms(delay);
         }
 
         while (state == SHIFT_RIGHT) {
             if (!(GPIOF->IDR & (1U << CENTER_PIN)))
+                led_pattern = 0;
                 state = PAUSE;
             if (!(GPIOF->IDR & (1U << LEFT_PIN)))
                 state = SHIFT_LEFT;
@@ -179,8 +184,10 @@ int main(void)
                 led_pattern |= 0x80;
             }
             LED_PORT->ODR = led_pattern;
-
-            delay_ms(read_pot());
+            
+            uint16_t pot_val = read_pot();          // 0–4095
+            uint32_t delay = 1 + (pot_val * 149) / 4095; // maps to ~1–150 ms
+            delay_ms(delay);
         }
     }
 }
