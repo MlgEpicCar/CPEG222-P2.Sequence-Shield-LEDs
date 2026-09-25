@@ -1,6 +1,10 @@
 /****************************************************************
 * Author: Carlos Munar (MlgEpicCar)
 * Project 2 - Sequence 8 LEDs on CPEG222 Shield, 9/24/26
+*
+* This program shifts LEDs (D1-D8) either left or right depending on user input.
+* Which LEDs are shifted are decided by the user with the switches (S1-S4).
+* The user can also control the frequency of LED shifts with the CPEG222 Shield's Analong Input.
 ****************************************************************/
 
 #include "stm32f4xx.h"
@@ -28,6 +32,9 @@
 /* Unlike the NUCLEO-F446ZE onboard LEDs, the CPEG222 Shield LEDs are PD0-7 (making it easy)*/
 #define LED_PORT GPIOD
 
+volatile int state = PAUSE;
+uint8_t led_pattern = 0;
+
 uint16_t read_pot(void) {
     /* Start conversion */
     ADC1->CR2 |= ADC_CR2_SWSTART;
@@ -45,7 +52,14 @@ void delay_ms(uint32_t ms)
     {
         for (volatile uint32_t i = 0; i < 16000; i++)
         {
-            // blocking delay
+            if (!(GPIOF->IDR & (1U << LEFT_PIN)))
+                state = SHIFT_LEFT;
+            if (!(GPIOF->IDR & (1U << CENTER_PIN))) {
+                led_pattern = 0;
+                state = PAUSE;
+            }
+            if (!(GPIOE->IDR & (1U << RIGHT_PIN)))
+                state = SHIFT_RIGHT;
         }
     }
 }
@@ -111,8 +125,8 @@ int main(void)
     /* Enable ADC */
     ADC1->CR2 |= ADC_CR2_ADON;
 
-    volatile int state = PAUSE;
-    uint8_t led_pattern = 0;
+    //volatile int state = PAUSE;
+    //uint8_t led_pattern = 0;
     
     while (1) {
 
@@ -150,12 +164,14 @@ int main(void)
         }
 
         while (state == SHIFT_LEFT) {
-            if (!(GPIOF->IDR & (1U << CENTER_PIN)))
+            if (!(GPIOF->IDR & (1U << CENTER_PIN))) {
                 led_pattern = 0;
                 state = PAUSE;
+            }
             if (!(GPIOE->IDR & (1U << RIGHT_PIN)))
                 state = SHIFT_RIGHT;
 
+            // memorize leftmost bit and place it on the right
             uint8_t left_bit = led_pattern & 0x80;
             led_pattern <<= 1;
             if (left_bit)
@@ -164,19 +180,21 @@ int main(void)
             }
             LED_PORT->ODR = led_pattern;
 
-
-            uint16_t pot_val = read_pot();          // 0–4095
+            // speed limit
+            uint16_t pot_val = read_pot(); // 0–4095
             uint32_t delay = 1 + (pot_val * 149) / 4095; // maps to ~1–150 ms
             delay_ms(delay);
         }
 
         while (state == SHIFT_RIGHT) {
-            if (!(GPIOF->IDR & (1U << CENTER_PIN)))
+            if (!(GPIOF->IDR & (1U << CENTER_PIN))) {
                 led_pattern = 0;
                 state = PAUSE;
+            }
             if (!(GPIOF->IDR & (1U << LEFT_PIN)))
                 state = SHIFT_LEFT;
 
+            // memorize rightmost bit and place it on the left
             uint8_t right_bit = led_pattern & 0x01;
             led_pattern >>= 1;
             if (right_bit)
@@ -185,7 +203,8 @@ int main(void)
             }
             LED_PORT->ODR = led_pattern;
             
-            uint16_t pot_val = read_pot();          // 0–4095
+            // speed limit
+            uint16_t pot_val = read_pot(); // 0–4095
             uint32_t delay = 1 + (pot_val * 149) / 4095; // maps to ~1–150 ms
             delay_ms(delay);
         }
