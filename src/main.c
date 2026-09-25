@@ -6,6 +6,13 @@
 #include "stm32f4xx.h"
 #include <stdbool.h>
 
+#define VPOT_PIN 2
+
+/* State Definitions*/
+#define SHIFT_LEFT  -1
+#define PAUSE        0
+#define SHIFT_RIGHT  1
+
 /* Button Definitions */
 #define LEFT_PIN 9 // GPIOF
 #define RIGHT_PIN 6 // NOTE: Right uses GPIOE (for some fucking reason)
@@ -21,20 +28,25 @@
 /* Unlike the NUCLEO-F446ZE onboard LEDs, the CPEG222 Shield LEDs are PD0-7 (making it easy)*/
 #define LED_PORT GPIOD
 
-volatile uint32_t button_debounce = 0;
+uint16_t read_pot(void) {
+    /* Start conversion */
+    ADC1->CR2 |= ADC_CR2_SWSTART;
 
-void SysTick_Handler(void) {
-    /* SUPER AWESOME DEBOUNCE TIME */
-    if (button_debounce == 0)
-    {
-        /* 100 ms debounce/cooldown */
-        button_debounce = 100;
-    }
+    /* Wait until conversion is complete */
+    while (!(ADC1->SR & ADC_SR_EOC));
 
-    /* Decrease cooldown every millisecond */
-    if (button_debounce > 0)
+    /* Return 12-bit ADC result */
+    return ADC1->DR;
+}
+
+void delay_ms(uint32_t ms)
+{
+    while (ms--)
     {
-        button_debounce--;
+        for (volatile uint32_t i = 0; i < 16000; i++)
+        {
+            // blocking delay
+        }
     }
 }
 
@@ -85,27 +97,90 @@ int main(void)
                      (3U << (S2 * 2))|
                      (3U << (S3 * 2))|
                      (3U << (S4 * 2))); 
+    
+    /* Configure PC2 as analog input */
+    GPIOC->MODER |= (3U << (VPOT_PIN * 2));
 
-    /* Configure SysTick*/
-    SysTick_Config(SystemCoreClock / 1000);
+    /* Analog to Digital Converter Shenanigans */
+    /* Enable ADC1 clock */
+    RCC->APB2ENR |= RCC_APB2ENR_ADC1EN;
+    /* ADC channel 12 */
+    ADC1->SQR3 = 12;
+    /* One conversion */
+    ADC1->SQR1 = 0;
+    /* Enable ADC */
+    ADC1->CR2 |= ADC_CR2_ADON;
 
-    while (1)
-    {
-        /* Turn on/off LEDs when switches are #switched */
-        if (SWITCH_PORT->IDR & (1U << S1)) { // SWITCH 1 & D1(LED 1)
-            LED_PORT->BSRR = (1U << 0); } else {
-            LED_PORT->BSRR = (1U << (0 + 16)); }
+    volatile int state = PAUSE;
+    uint8_t led_pattern = 0;
+    
+    while (1) {
 
-        if (SWITCH_PORT->IDR & (1U << S2)) { // SWITCH 2 & D2(LED 2)
-            LED_PORT->BSRR = (1U << 1); } else {
-            LED_PORT->BSRR = (1U << (1 + 16)); }
+        while (state == PAUSE)
+        {
+            // Turn on/off LEDs when switches are #switched
+            if (SWITCH_PORT->IDR & (1U << S1))
+                led_pattern |= (1U << 0);
+            else
+                led_pattern &= ~(1U << 0);
 
-        if (SWITCH_PORT->IDR & (1U << S3)) { // SWITCH 3 & D3
-            LED_PORT->BSRR = (1U << 2); } else {
-            LED_PORT->BSRR = (1U << (2 + 16)); }
+            if (SWITCH_PORT->IDR & (1U << S2))
+                led_pattern |= (1U << 1);
+            else
+                led_pattern &= ~(1U << 1);
 
-        if (SWITCH_PORT->IDR & (1U << S4)) { // SWITCH 4 & D4
-            LED_PORT->BSRR = (1U << 3); } else {
-            LED_PORT->BSRR = (1U << (3 + 16)); }
+            if (SWITCH_PORT->IDR & (1U << S3))
+                led_pattern |= (1U << 2);
+            else
+                led_pattern &= ~(1U << 2);
+
+            if (SWITCH_PORT->IDR & (1U << S4))
+                led_pattern |= (1U << 3);
+            else
+                led_pattern &= ~(1U << 3);
+
+            // Display the pattern
+            LED_PORT->ODR = led_pattern;
+
+            // Trigger Left/Right Movement when a directional button is pressed 
+            if (!(GPIOF->IDR & (1U << LEFT_PIN)))
+                state = SHIFT_LEFT;
+            if (!(GPIOE->IDR & (1U << RIGHT_PIN)))
+                state = SHIFT_RIGHT;
+        }
+
+        while (state == SHIFT_LEFT) {
+            if (!(GPIOF->IDR & (1U << CENTER_PIN)))
+                state = PAUSE;
+            if (!(GPIOE->IDR & (1U << RIGHT_PIN)))
+                state = SHIFT_RIGHT;
+
+            uint8_t left_bit = led_pattern & 0x80;
+            led_pattern <<= 1;
+            if (left_bit)
+            {
+                led_pattern |= 0x01;
+            }
+            LED_PORT->ODR = led_pattern;
+
+            delay_ms(read_pot());
+        }
+
+        while (state == SHIFT_RIGHT) {
+            if (!(GPIOF->IDR & (1U << CENTER_PIN)))
+                state = PAUSE;
+            if (!(GPIOF->IDR & (1U << LEFT_PIN)))
+                state = SHIFT_LEFT;
+
+            uint8_t right_bit = led_pattern & 0x01;
+            led_pattern >>= 1;
+            if (right_bit)
+            {
+                led_pattern |= 0x80;
+            }
+            LED_PORT->ODR = led_pattern;
+
+            delay_ms(read_pot());
+        }
     }
 }
